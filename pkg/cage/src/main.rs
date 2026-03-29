@@ -14,7 +14,7 @@ use std::path::Path;
 
 const SOCKET_PATH: &str = "/run/cage.sock";
 const AGENT_DIR: &str = "/agent";
-const AGENT_ROOTFS_BASE: &str = "/var/lib/cage/rootfs";
+const AGENT_ROOTFS_BASE: &str = "/system/rootfs";
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -67,8 +67,7 @@ fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     let manifests = load_manifests();
     log(&format!("cage: {} agent manifest(s) loaded", manifests.len()));
 
-    // Initialize VM manager
-    std::fs::create_dir_all(AGENT_ROOTFS_BASE).ok();
+    // Initialize VM manager (rootfs lives on read-only SquashFS at /system/rootfs/)
     let mut vm_mgr = VmManager::new(AGENT_ROOTFS_BASE);
 
     // Clean up stale socket
@@ -80,6 +79,21 @@ fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     // Listen for lifecycle commands
     let listener = UnixListener::bind(SOCKET_PATH)?;
     log(&format!("cage: listening on {SOCKET_PATH}"));
+
+    // Auto-start all agents that have a valid rootfs
+    for (name, manifest) in &manifests {
+        let exec_path = format!("/agent/bin/{name}");
+        let rootfs_path = format!("{AGENT_ROOTFS_BASE}/{name}");
+        let bin_path = format!("{rootfs_path}/agent/bin/{name}");
+        if Path::new(&bin_path).exists() {
+            match vm_mgr.start_agent(manifest, &exec_path) {
+                Ok(pid) => log(&format!("cage: auto-started '{name}' (PID {pid})")),
+                Err(e) => log(&format!("cage: failed to auto-start '{name}': {e}")),
+            }
+        } else {
+            log(&format!("cage: skipping '{name}' — no rootfs at {rootfs_path}"));
+        }
+    }
 
     for stream in listener.incoming() {
         match stream {

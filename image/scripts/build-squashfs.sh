@@ -150,6 +150,20 @@ write = ["/data/output"]
 EOF
 echo "  Created test AGENT.toml"
 
+# Build and install test-agent rootfs
+echo ">>> Preparing test-agent rootfs..."
+TEST_AGENT_BIN="${RELEASE_DIR}/test-agent"
+if [[ ! -f "${TEST_AGENT_BIN}" ]]; then
+    TEST_AGENT_BIN="${NULLBOX_ROOT}/target/${TARGET}/release/test-agent"
+fi
+if [[ -f "${TEST_AGENT_BIN}" ]]; then
+    AGENT_ROOTFS="${BUILD_DIR}/system/rootfs/test-agent"
+    chmod +x "${NULLBOX_ROOT}/image/scripts/prepare-agent-rootfs.sh"
+    "${NULLBOX_ROOT}/image/scripts/prepare-agent-rootfs.sh" test-agent "${TEST_AGENT_BIN}" "${AGENT_ROOTFS}"
+else
+    echo "  WARNING: test-agent binary not found, skipping rootfs"
+fi
+
 # Build SquashFS image with zstd compression
 echo ">>> Building SquashFS image..."
 mksquashfs "${BUILD_DIR}" "${OUTPUT_DIR}/nullbox.squashfs" \

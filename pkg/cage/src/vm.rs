@@ -66,6 +66,7 @@ impl VmManager {
             workdir: "/".to_string(),
         };
 
+        validate_rootfs(&config.root_path, &config.exec_path)?;
         let pid = spawn_vm_process(&config)?;
 
         self.vms.insert(
@@ -122,19 +123,36 @@ impl VmManager {
     }
 }
 
+/// Validate that the rootfs directory and exec binary exist before spawning.
+fn validate_rootfs(root_path: &str, exec_path: &str) -> Result<(), VmError> {
+    let root = std::path::Path::new(root_path);
+    if !root.is_dir() {
+        return Err(VmError::RootfsInvalid(format!(
+            "rootfs directory not found: {root_path}"
+        )));
+    }
+
+    let bin_host_path = root.join(exec_path.trim_start_matches('/'));
+    if !bin_host_path.exists() {
+        return Err(VmError::RootfsInvalid(format!(
+            "agent binary not found at {}",
+            bin_host_path.display()
+        )));
+    }
+
+    Ok(())
+}
+
 /// Fork a child process that calls krun_start_enter().
 fn spawn_vm_process(config: &VmConfig) -> Result<u32, VmError> {
-    // We use std::process::Command to spawn a new instance of the cage
-    // binary with a special --run-vm flag. The child process then calls
-    // krun_start_enter() which never returns.
-    //
-    // Why not fork()? Static musl binaries + fork is safe, but
-    // Command::new is cleaner and lets us redirect stdout/stderr.
-
     let config_json =
         serde_json::to_string(config).map_err(|e| VmError::Internal(e.to_string()))?;
 
-    let child = std::process::Command::new("/system/bin/cage")
+    // Use our own binary path so this works both inside SquashFS and during dev
+    let cage_bin = std::env::current_exe()
+        .unwrap_or_else(|_| std::path::PathBuf::from("/system/bin/cage"));
+
+    let child = std::process::Command::new(cage_bin)
         .arg("--run-vm")
         .arg(&config_json)
         .spawn()
@@ -151,6 +169,8 @@ pub enum VmError {
     NotRunning(String),
     #[error("failed to spawn VM process: {0}")]
     SpawnFailed(String),
+    #[error("rootfs invalid: {0}")]
+    RootfsInvalid(String),
     #[error("internal error: {0}")]
     Internal(String),
 }

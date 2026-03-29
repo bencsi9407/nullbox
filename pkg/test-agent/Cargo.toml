@@ -1,0 +1,8 @@
+[package]
+name = "test-agent"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "test-agent"
+path = "src/main.rs"
