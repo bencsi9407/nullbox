@@ -8,6 +8,10 @@ license.workspace = true
 name = "egress"
 path = "src/lib.rs"
 
+[[bin]]
+name = "egress"
+path = "src/main.rs"
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 log = "0.4"

@@ -33,7 +33,7 @@ mkdir -p "${OUTPUT_DIR}"
 rm -rf "${BUILD_DIR:?}"
 
 # Create filesystem layout (from ARCHITECTURE.md)
-mkdir -p "${BUILD_DIR}"/{system/bin,system/config,etc,tmp,var,agent,vault,snapshots,proc,sys,dev,run}
+mkdir -p "${BUILD_DIR}"/{system/bin,system/config,etc,tmp,var/lib/ctxgraph,agent,vault,snapshots,proc,sys,dev,run}
 mkdir -p "${BUILD_DIR}/dev"/{pts,shm}
 
 # Copy binaries
@@ -56,30 +56,31 @@ copy_binary() {
 echo ">>> Copying binaries..."
 copy_binary nulld
 copy_binary nullctl
-
-# For v0.1, cage/egress/ctxgraph are libraries linked into nulld or
-# run as separate binaries. Create placeholder scripts for now.
-# These will be replaced with actual binaries as we implement the daemons.
-for svc in cage egress ctxgraph; do
-    if [[ ! -f "${BUILD_DIR}/system/bin/${svc}" ]]; then
-        cat > "${BUILD_DIR}/system/bin/${svc}" << EOF
-#!/bin/sh
-echo "${svc}: placeholder service running"
-while true; do sleep 3600; done
-EOF
-        chmod +x "${BUILD_DIR}/system/bin/${svc}"
-        echo "  Created ${svc} placeholder"
-    fi
-done
+copy_binary egress
+copy_binary ctxgraph
+copy_binary cage
 
 # Create nulld.toml service configuration
 cat > "${BUILD_DIR}/system/config/nulld.toml" << 'EOF'
 # NullBox v0.1 service configuration
 # Services are started in dependency order by nulld.
-#
-# NOTE: Service daemons (egress, ctxgraph, cage) will be added
-# as they are implemented as standalone binaries.
-# For now, nulld boots to idle — verifying the init chain works.
+
+[service.egress]
+binary = "/system/bin/egress"
+args = []
+depends_on = []
+restart = "always"
+
+[service.ctxgraph]
+binary = "/system/bin/ctxgraph"
+args = []
+depends_on = []
+restart = "always"
+
+[service.cage]
+binary = "/system/bin/cage"
+depends_on = ["egress", "ctxgraph"]
+restart = "always"
 EOF
 echo "  Created nulld.toml"
 

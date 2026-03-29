@@ -50,11 +50,15 @@ cp "${INITRAMFS}" "${BUILD_DIR}/boot/initramfs.cpio.gz"
 
 # Create GRUB config
 cat > "${BUILD_DIR}/boot/grub/grub.cfg" << 'EOF'
+serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1
+terminal_input serial console
+terminal_output serial console
+
 set timeout=3
 set default=0
 
 menuentry "NullBox v0.1" {
-    linux /boot/vmlinuz console=ttyS0,115200 console=tty0 quiet
+    linux /boot/vmlinuz console=ttyS0,115200 console=tty0 loglevel=4
     initrd /boot/initramfs.cpio.gz
 }
 
