@@ -1,4 +1,4 @@
-# NullBox — The Operating System for AI Agents
+# NullBox - The Operating System for AI Agents
 
 > "If all you're running is agents, why manage a full OS?"
 
@@ -9,12 +9,6 @@ NullBox is an immutable, minimal, flashable Linux OS where every layer exists to
 ## The One-Sentence Pitch
 
 NullBox is Talos Linux for AI agents — a hardened, immutable OS that makes per-agent hardware isolation, credential vaulting, PII redaction, prompt injection defense, and cryptographic audit a kernel-level guarantee, not an application-layer hope.
-
----
-
-## Why "NullBox"
-
-Null: nothing unnecessary. Box: a sealed, self-contained appliance. A NullBox has no SSH, no shell, no package manager, no mutable root filesystem, no attack surface beyond what agents explicitly declare. The box boots, runs agents, and does nothing else.
 
 ---
 
