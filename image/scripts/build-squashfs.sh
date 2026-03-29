@@ -60,6 +60,40 @@ copy_binary egress
 copy_binary ctxgraph
 copy_binary cage
 
+# cage links dynamically against libkrun — copy required shared libraries
+echo ">>> Copying shared libraries for cage..."
+mkdir -p "${BUILD_DIR}/usr/lib"
+CAGE_BIN="${BUILD_DIR}/system/bin/cage"
+if [[ -f "${CAGE_BIN}" ]] && ldd "${CAGE_BIN}" &>/dev/null; then
+    # Copy libkrun and libkrunfw
+    for lib in libkrun libkrunfw; do
+        SO_FILE=$(find /usr/lib -maxdepth 1 -name "${lib}.so.*" ! -type l | head -1)
+        if [[ -n "${SO_FILE}" ]]; then
+            cp "${SO_FILE}" "${BUILD_DIR}/usr/lib/"
+            # Create symlinks
+            SONAME=$(objdump -p "${SO_FILE}" 2>/dev/null | grep SONAME | awk '{print $2}')
+            if [[ -n "${SONAME}" ]]; then
+                ln -sf "$(basename "${SO_FILE}")" "${BUILD_DIR}/usr/lib/${SONAME}"
+            fi
+            ln -sf "$(basename "${SO_FILE}")" "${BUILD_DIR}/usr/lib/${lib}.so"
+            echo "  Copied ${lib}"
+        fi
+    done
+    # Copy the dynamic linker
+    if [[ -f /lib64/ld-linux-x86-64.so.2 ]]; then
+        mkdir -p "${BUILD_DIR}/lib64"
+        cp /lib64/ld-linux-x86-64.so.2 "${BUILD_DIR}/lib64/"
+        echo "  Copied ld-linux"
+    fi
+    # Copy all other shared lib deps
+    ldd "${CAGE_BIN}" 2>/dev/null | grep "=> /" | awk '{print $3}' | while read -r lib; do
+        if [[ ! -f "${BUILD_DIR}/usr/lib/$(basename "${lib}")" ]]; then
+            cp "${lib}" "${BUILD_DIR}/usr/lib/"
+        fi
+    done
+    echo "  Copied runtime dependencies"
+fi
+
 # Create nulld.toml service configuration
 cat > "${BUILD_DIR}/system/config/nulld.toml" << 'EOF'
 # NullBox v0.1 service configuration

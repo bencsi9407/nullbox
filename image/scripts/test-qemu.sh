@@ -23,23 +23,23 @@ MEMORY="${QEMU_MEMORY:-4G}"
 CPUS="${QEMU_CPUS:-2}"
 
 # Common QEMU flags
+# Detect nested virt CPU flags
+CPU_MODEL="host"
+if grep -q "vendor_id.*GenuineIntel" /proc/cpuinfo 2>/dev/null; then
+    CPU_MODEL="host,+vmx"
+elif grep -q "vendor_id.*AuthenticAMD" /proc/cpuinfo 2>/dev/null; then
+    CPU_MODEL="host,+svm"
+fi
+
 QEMU_COMMON=(
     -enable-kvm
     -m "${MEMORY}"
     -smp "${CPUS}"
-    -cpu host
+    -cpu "${CPU_MODEL}"
     -nographic
     -serial mon:stdio
     -no-reboot
 )
-
-# Add nested virt support for Cage microVM testing
-# Detect Intel vs AMD
-if grep -q "vendor_id.*GenuineIntel" /proc/cpuinfo 2>/dev/null; then
-    QEMU_COMMON+=(-cpu "host,+vmx")
-elif grep -q "vendor_id.*AuthenticAMD" /proc/cpuinfo 2>/dev/null; then
-    QEMU_COMMON+=(-cpu "host,+svm")
-fi
 
 case "${MODE}" in
     kernel)

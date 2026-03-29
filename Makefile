@@ -31,7 +31,8 @@ build:
 	cargo build --workspace
 
 release:
-	cargo build --workspace --target $(TARGET) --release
+	cargo build --workspace --exclude cage --target $(TARGET) --release
+	cargo build -p cage --release
 
 # === Kernel ===
 
