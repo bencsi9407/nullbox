@@ -4,6 +4,7 @@
 //! reaps orphaned children, handles shutdown.
 
 mod config;
+mod control;
 mod mount;
 mod service;
 mod signal;
@@ -58,17 +59,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     log_kmsg("nulld: loading service configuration");
     let services = config::load_services()?;
 
-    // Phase 4: Start services in dependency order
+    // Phase 4: Bind control socket (before starting services so it's ready)
+    let ctl = control::ControlSocket::bind()?;
+
+    // Phase 5: Start services in dependency order
     log_kmsg("nulld: starting services");
     let mut sup = supervisor::Supervisor::new(services);
     sup.start_all()?;
 
     log_kmsg("nulld: all services started — entering main loop");
 
-    // Phase 5: Main loop — reap children, check health, handle shutdown
-    sup.run_until_shutdown(&shutdown_flag)?;
+    // Phase 6: Main loop — reap children, check health, handle shutdown
+    sup.run_until_shutdown(shutdown_flag, &ctl)?;
 
-    // Phase 6: Stop services in reverse dependency order
+    // Phase 7: Stop services in reverse dependency order
     log_kmsg("nulld: shutting down services");
     sup.stop_all();
 

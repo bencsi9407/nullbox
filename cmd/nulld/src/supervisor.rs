@@ -7,6 +7,7 @@ use crate::service::{self, RestartPolicy, ServiceDef};
 use crate::signal;
 use nix::sys::signal::Signal;
 use nix::unistd::Pid;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
@@ -25,12 +26,22 @@ struct ManagedService {
     next_restart: Option<Instant>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 enum ServiceState {
     Stopped,
     Running,
     Failed,
     WaitingRestart,
+}
+
+/// Snapshot of a service's status, returned by the control socket.
+#[derive(Debug, Serialize)]
+pub struct ServiceStatus {
+    pub name: String,
+    pub state: String,
+    pub pid: Option<u32>,
+    pub restart_count: u32,
 }
 
 pub struct Supervisor {
@@ -114,10 +125,11 @@ impl Supervisor {
         }
     }
 
-    /// Main loop: reap children, handle restarts, check for shutdown.
+    /// Main loop: reap children, handle restarts, poll control socket, check for shutdown.
     pub fn run_until_shutdown(
         &mut self,
         shutdown_flag: &AtomicBool,
+        ctl: &crate::control::ControlSocket,
     ) -> Result<(), SupervisorError> {
         loop {
             if signal::shutdown_requested(shutdown_flag) {
@@ -133,6 +145,9 @@ impl Supervisor {
 
             // Process pending restarts
             self.process_restarts();
+
+            // Poll control socket for commands
+            ctl.poll(self, shutdown_flag);
 
             std::thread::sleep(MAIN_LOOP_INTERVAL);
         }
@@ -202,6 +217,21 @@ impl Supervisor {
                 ));
             }
         }
+    }
+
+    /// Return a snapshot of all service statuses.
+    pub fn status(&self) -> Vec<ServiceStatus> {
+        self.start_order
+            .iter()
+            .filter_map(|name| {
+                self.services.get(name).map(|svc| ServiceStatus {
+                    name: name.clone(),
+                    state: format!("{:?}", svc.state).to_lowercase(),
+                    pid: svc.pid,
+                    restart_count: svc.restart_count,
+                })
+            })
+            .collect()
     }
 
     /// Stop all services in reverse dependency order.

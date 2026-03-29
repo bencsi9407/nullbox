@@ -1,7 +1,6 @@
 //! nullctl — CLI for NullBox.
 //!
 //! Communicates with nulld via Unix socket to manage agents and services.
-//! For v0.1: minimal command set (agent start/stop, status).
 
 use std::env;
 use std::io::{BufRead, BufReader, Write};
@@ -19,8 +18,8 @@ fn main() {
     }
 
     let result = match args[0].as_str() {
-        "agent" => handle_agent(&args[1..]),
         "status" => handle_status(),
+        "shutdown" => handle_shutdown(),
         "help" | "--help" | "-h" => {
             print_usage();
             Ok(())
@@ -38,61 +37,65 @@ fn main() {
     }
 }
 
-fn handle_agent(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    if args.is_empty() {
-        eprintln!("nullctl agent: missing subcommand");
-        eprintln!("usage: nullctl agent <start|stop|pause|resume> <name>");
-        return Err("missing subcommand".into());
+fn handle_status() -> Result<(), Box<dyn std::error::Error>> {
+    let response = send_request("status")?;
+    let parsed: serde_json::Value = serde_json::from_str(&response)?;
+
+    if let Some(services) = parsed.get("services").and_then(|s| s.as_array()) {
+        println!("{:<15} {:<12} {:<8} {}", "SERVICE", "STATE", "PID", "RESTARTS");
+        for svc in services {
+            let name = svc.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+            let state = svc.get("state").and_then(|v| v.as_str()).unwrap_or("?");
+            let pid = svc
+                .get("pid")
+                .and_then(|v| v.as_u64())
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| "-".to_string());
+            let restarts = svc.get("restart_count").and_then(|v| v.as_u64()).unwrap_or(0);
+            println!("{:<15} {:<12} {:<8} {}", name, state, pid, restarts);
+        }
+    } else if let Some(err) = parsed.get("error").and_then(|e| e.as_str()) {
+        eprintln!("nulld: {err}");
     }
 
-    let subcommand = &args[0];
-    let name = args
-        .get(1)
-        .ok_or("missing agent name")?;
-
-    let command = serde_json::json!({
-        "type": "agent",
-        "action": subcommand,
-        "name": name,
-    });
-
-    send_command(&command)
+    Ok(())
 }
 
-fn handle_status() -> Result<(), Box<dyn std::error::Error>> {
-    let command = serde_json::json!({
-        "type": "status",
-    });
+fn handle_shutdown() -> Result<(), Box<dyn std::error::Error>> {
+    let response = send_request("shutdown")?;
+    let parsed: serde_json::Value = serde_json::from_str(&response)?;
 
-    send_command(&command)
+    if parsed.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+        println!("nulld: shutdown initiated");
+    } else if let Some(err) = parsed.get("error").and_then(|e| e.as_str()) {
+        eprintln!("nulld: {err}");
+    }
+
+    Ok(())
 }
 
-fn send_command(
-    command: &serde_json::Value,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn send_request(method: &str) -> Result<String, Box<dyn std::error::Error>> {
     let mut stream = UnixStream::connect(NULLD_SOCKET).map_err(|e| {
         format!("cannot connect to nulld at {NULLD_SOCKET}: {e}")
     })?;
 
-    let json = serde_json::to_string(command)?;
-    writeln!(stream, "{json}")?;
+    let request = serde_json::json!({"method": method});
+    writeln!(stream, "{}", serde_json::to_string(&request)?)?;
     stream.shutdown(std::net::Shutdown::Write)?;
 
     let reader = BufReader::new(&stream);
-    for line in reader.lines() {
-        println!("{}", line?);
-    }
+    let line = reader
+        .lines()
+        .next()
+        .ok_or("no response from nulld")??;
 
-    Ok(())
+    Ok(line)
 }
 
 fn print_usage() {
     eprintln!("nullctl — NullBox CLI");
     eprintln!();
     eprintln!("usage:");
-    eprintln!("  nullctl agent start <name>    Start an agent");
-    eprintln!("  nullctl agent stop <name>     Stop an agent");
-    eprintln!("  nullctl agent pause <name>    Pause an agent");
-    eprintln!("  nullctl agent resume <name>   Resume an agent");
-    eprintln!("  nullctl status                Show system status");
+    eprintln!("  nullctl status      Show service status");
+    eprintln!("  nullctl shutdown    Initiate clean shutdown");
 }
