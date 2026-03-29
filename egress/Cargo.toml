@@ -1,0 +1,19 @@
+[package]
+name = "egress"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "egress"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+log = "0.4"
+thiserror = "2"
+hickory-resolver = "0.25"
+ipnet = "2"
+
+[dev-dependencies]
+tempfile = "3"
