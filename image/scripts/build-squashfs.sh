@@ -196,6 +196,13 @@ else
     echo "  WARNING: test-agent binary not found, skipping rootfs"
 fi
 
+# Generate warden master key for dev/testing
+echo ">>> Generating warden master key..."
+mkdir -p "${BUILD_DIR}/vault"
+dd if=/dev/urandom bs=32 count=1 2>/dev/null > "${BUILD_DIR}/vault/master.key"
+chmod 600 "${BUILD_DIR}/vault/master.key"
+echo "  Generated /vault/master.key (32 bytes, dev only — use sealed secrets in production)"
+
 # Build SquashFS image with zstd compression
 echo ">>> Building SquashFS image..."
 mksquashfs "${BUILD_DIR}" "${OUTPUT_DIR}/nullbox.squashfs" \

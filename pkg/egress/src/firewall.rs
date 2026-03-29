@@ -67,8 +67,9 @@ pub fn generate_tsi_ruleset(agent_rules: &[TsiAgentRule]) -> Ruleset {
 
     // Block cloud metadata endpoints
     for cidr in blocklist::CLOUD_METADATA_CIDRS {
+        let family = if cidr.contains(':') { "ip6" } else { "ip" };
         rules.push_str(&format!(
-            "    ip daddr {cidr} drop comment \"block cloud metadata\"\n"
+            "    {family} daddr {cidr} drop comment \"block cloud metadata\"\n"
         ));
     }
     rules.push_str("\n");
@@ -127,8 +128,9 @@ pub fn generate_ruleset(agent_rules: &[AgentAllowRule]) -> Ruleset {
     rules.push_str("\n");
 
     for cidr in blocklist::CLOUD_METADATA_CIDRS {
+        let family = if cidr.contains(':') { "ip6" } else { "ip" };
         rules.push_str(&format!(
-            "    ip daddr {cidr} drop comment \"block cloud metadata\"\n"
+            "    {family} daddr {cidr} drop comment \"block cloud metadata\"\n"
         ));
     }
     rules.push_str("\n");

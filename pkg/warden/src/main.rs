@@ -28,8 +28,8 @@ fn main() {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     log("warden: starting encrypted secret vault");
 
-    // Ensure vault directory exists
-    std::fs::create_dir_all("/vault").ok();
+    // Ensure vault directory exists (/run is tmpfs — writable at runtime)
+    std::fs::create_dir_all("/run/warden").ok();
 
     let vault_path = Path::new(vault::VAULT_PATH);
     let mut vault = Vault::load(vault_path)?;

@@ -14,7 +14,7 @@ use crate::master_key;
 use std::collections::HashMap;
 use std::path::Path;
 
-pub const VAULT_PATH: &str = "/vault/secrets.enc";
+pub const VAULT_PATH: &str = "/run/warden/secrets.enc";
 
 /// In-memory vault holding decrypted secrets and the master key.
 pub struct Vault {
