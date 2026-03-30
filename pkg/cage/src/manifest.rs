@@ -3,11 +3,11 @@
 //! Every agent declares exactly what it needs. Cage reads the manifest
 //! and creates a microVM with exactly these permissions — nothing more.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Parsed AGENT.toml manifest.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentManifest {
     pub agent: AgentMeta,
     #[serde(default)]
@@ -16,7 +16,7 @@ pub struct AgentManifest {
     pub tools: std::collections::HashMap<String, ToolDef>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentMeta {
     pub name: String,
     #[serde(default = "default_version")]
@@ -27,7 +27,7 @@ fn default_version() -> String {
     "0.0.0".to_string()
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Capabilities {
     #[serde(default)]
     pub network: NetworkCaps,
@@ -74,13 +74,13 @@ fn default_memory() -> u32 {
     256
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NetworkCaps {
     #[serde(default)]
     pub allow: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FilesystemCaps {
     #[serde(default)]
     pub read: Vec<String>,
@@ -88,12 +88,12 @@ pub struct FilesystemCaps {
     pub write: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDef {
     pub risk: RiskLevel,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RiskLevel {
     Low,

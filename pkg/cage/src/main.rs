@@ -49,7 +49,27 @@ fn run_vm_child(config_json: &str) {
 
     krun::set_log_level(2); // Warn
 
-    if let Err(e) = krun::run_vm(&config) {
+    // Seccomp + Landlock sandbox. Gated behind CAGE_ENFORCE=1 in v0.1 to
+    // avoid audit noise in nested-KVM smoke tests.
+    let pre_enter = || {
+        if std::env::var("CAGE_ENFORCE").is_err() {
+            return;
+        }
+        let Some(toml_json) = config.manifest_toml.as_deref() else { return };
+        let Ok(manifest) = serde_json::from_str::<cage::manifest::AgentManifest>(toml_json) else { return };
+        let name = &config.name;
+
+        let sandbox = cage::fs_sandbox::build_sandbox(&config, &manifest);
+        if let Err(e) = cage::fs_sandbox::apply(&sandbox) {
+            eprintln!("cage: [{name}] Landlock: {e}");
+        }
+        let profile = cage::seccomp::build_profile(&manifest);
+        if let Err(e) = cage::seccomp::apply(&profile, false) {
+            eprintln!("cage: [{name}] seccomp: {e}");
+        }
+    };
+
+    if let Err(e) = krun::run_vm(&config, pre_enter) {
         eprintln!("cage: VM '{}' failed: {e}", config.name);
         std::process::exit(1);
     }

@@ -53,6 +53,10 @@ pub struct VmConfig {
     pub rlimits: Vec<String>,
     #[serde(default)]
     pub console_output: Option<String>,
+    /// Serialized AGENT.toml content, passed to the child process for
+    /// seccomp/landlock policy construction.
+    #[serde(default)]
+    pub manifest_toml: Option<String>,
 }
 
 /// Errors from libkrun operations.
@@ -92,7 +96,11 @@ pub fn set_log_level(level: u32) {
 ///
 /// **WARNING**: `krun_start_enter` never returns on success.
 /// This function should only be called from a forked child process.
-pub fn run_vm(config: &VmConfig) -> Result<(), KrunError> {
+///
+/// The `pre_enter` callback is invoked after all krun setup is complete
+/// but before `krun_start_enter`. Use it to install seccomp filters and
+/// Landlock sandboxes that persist into the VM entry.
+pub fn run_vm(config: &VmConfig, pre_enter: impl FnOnce()) -> Result<(), KrunError> {
     unsafe {
         // Create context
         let ctx = krun_create_ctx();
@@ -211,6 +219,9 @@ pub fn run_vm(config: &VmConfig) -> Result<(), KrunError> {
             return Err(KrunError::SetExec(ret));
         }
 
+        // Apply pre-enter hooks (seccomp, landlock) before entering the VM
+        pre_enter();
+
         // Start VM — this call never returns on success
         let ret = krun_start_enter(ctx);
         Err(KrunError::StartEnter(ret))
@@ -253,6 +264,7 @@ mod tests {
                 "RLIMIT_NPROC=64:64".to_string(),
             ],
             console_output: Some("/var/log/cage/test.log".to_string()),
+            manifest_toml: None,
         };
 
         let json = serde_json::to_string(&config).unwrap();
@@ -287,6 +299,7 @@ mod tests {
         assert!(config.virtiofs_mounts.is_empty());
         assert!(config.rlimits.is_empty());
         assert!(config.console_output.is_none());
+        assert!(config.manifest_toml.is_none());
     }
 
     #[test]

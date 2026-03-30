@@ -95,6 +95,7 @@ impl VmManager {
             virtiofs_mounts,
             rlimits,
             console_output,
+            manifest_toml: serde_json::to_string(manifest).ok(),
         };
 
         validate_rootfs(&config.root_path, &config.exec_path)?;

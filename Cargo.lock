@@ -39,6 +39,7 @@ dependencies = [
 name = "cage"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "log",
  "nix",
  "pkg-config",
