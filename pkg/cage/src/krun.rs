@@ -97,9 +97,8 @@ pub fn set_log_level(level: u32) {
 /// **WARNING**: `krun_start_enter` never returns on success.
 /// This function should only be called from a forked child process.
 ///
-/// The `pre_enter` callback is invoked after all krun setup is complete
-/// but before `krun_start_enter`. Use it to install seccomp filters and
-/// Landlock sandboxes that persist into the VM entry.
+/// The `pre_enter` callback is invoked after all krun setup but before
+/// `krun_start_enter`. Use it for seccomp/landlock enforcement.
 pub fn run_vm(config: &VmConfig, pre_enter: impl FnOnce()) -> Result<(), KrunError> {
     unsafe {
         // Create context
@@ -219,7 +218,7 @@ pub fn run_vm(config: &VmConfig, pre_enter: impl FnOnce()) -> Result<(), KrunErr
             return Err(KrunError::SetExec(ret));
         }
 
-        // Apply pre-enter hooks (seccomp, landlock) before entering the VM
+        // Apply pre-enter hooks (seccomp, landlock)
         pre_enter();
 
         // Start VM — this call never returns on success

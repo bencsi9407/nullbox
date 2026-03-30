@@ -49,8 +49,7 @@ fn run_vm_child(config_json: &str) {
 
     krun::set_log_level(2); // Warn
 
-    // Seccomp + Landlock sandbox. Gated behind CAGE_ENFORCE=1 in v0.1 to
-    // avoid audit noise in nested-KVM smoke tests.
+    // Seccomp + Landlock sandbox, gated behind CAGE_ENFORCE=1.
     let pre_enter = || {
         if std::env::var("CAGE_ENFORCE").is_err() {
             return;

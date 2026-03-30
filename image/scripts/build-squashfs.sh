@@ -220,7 +220,9 @@ fi
 
 # Tighten permissions
 echo ">>> Tightening permissions..."
-chmod 500 "${BUILD_DIR}/system/bin/"*
+# cage needs world-readable (555): libkrun VMM drops privileges internally.
+# Other binaries are static and run as root — 555 is safe, 500 breaks cage.
+chmod 555 "${BUILD_DIR}/system/bin/"*
 chmod 644 "${BUILD_DIR}/system/config/nulld.toml"
 chmod 755 "${BUILD_DIR}/etc"
 chmod 644 "${BUILD_DIR}/etc/"*
