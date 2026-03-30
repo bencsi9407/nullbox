@@ -171,18 +171,27 @@ pub fn mount_persistent() {
             continue;
         }
 
-        // Try mounting as ext4
+        // Mount read-only first for sentinel check (safe probe of untrusted disk)
         let result = mount(
             Some(*dev),
             "/data",
             Some("ext4"),
-            MsFlags::MS_NOATIME,
+            MsFlags::MS_RDONLY.union(MsFlags::MS_NOATIME),
             None::<&str>,
         );
 
         if result.is_ok() {
-            // Check for sentinel file
+            // Check for sentinel file on read-only mount
             if std::path::Path::new("/data/.nullbox-data").exists() {
+                // Sentinel found — remount read-write
+                let _ = mount(
+                    Some(*dev),
+                    "/data",
+                    Some("ext4"),
+                    MsFlags::MS_REMOUNT.union(MsFlags::MS_NOATIME),
+                    None::<&str>,
+                );
+
                 // Create subdirectories for persistent state
                 let _ = fs::create_dir_all("/data/vault");
                 let _ = fs::create_dir_all("/data/ctxgraph");

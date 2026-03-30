@@ -14,8 +14,9 @@
 use egress::firewall::{self, TsiAgentRule};
 use egress::resolve;
 use std::collections::{BTreeSet, HashMap};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::IpAddr;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::process::Command;
@@ -53,6 +54,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let listener = UnixListener::bind(SOCKET_PATH)?;
+    std::fs::set_permissions(SOCKET_PATH, std::fs::Permissions::from_mode(0o600))?;
     log(&format!("egress: listening on {SOCKET_PATH}"));
 
     for stream in listener.incoming() {
@@ -75,7 +77,7 @@ fn handle_connection(
 ) {
     let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(500)));
 
-    let reader = BufReader::new(stream);
+    let reader = BufReader::new(stream.take(65536));
     for line in reader.lines() {
         let line = match line {
             Ok(l) => l,

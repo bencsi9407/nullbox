@@ -283,17 +283,24 @@ impl Supervisor {
 }
 
 /// Spawn a child process. Returns the PID.
+///
+/// Environment is cleared to prevent leaking host secrets to services.
 fn spawn_process(binary: &str, args: &[String]) -> Result<u32, std::io::Error> {
     use std::process::Command;
 
-    let child = Command::new(binary).args(args).spawn()?;
+    let child = Command::new(binary)
+        .args(args)
+        .env_clear()
+        .env("PATH", "/system/bin:/usr/bin:/bin")
+        .spawn()?;
 
     Ok(child.id())
 }
 
 /// Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s, 30s, ...
 fn calculate_backoff(restart_count: u32) -> Duration {
-    let secs = INITIAL_BACKOFF.as_secs() * 2u64.pow(restart_count);
+    let exponent = restart_count.min(30);
+    let secs = INITIAL_BACKOFF.as_secs().saturating_mul(2u64.saturating_pow(exponent));
     Duration::from_secs(secs).min(MAX_BACKOFF)
 }
 

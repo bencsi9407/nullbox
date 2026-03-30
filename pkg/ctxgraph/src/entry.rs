@@ -27,9 +27,23 @@ pub fn compute_hash(
     hasher.update(key.as_bytes());
     hasher.update(b"\0");
     // Canonical JSON: sorted keys, no whitespace
-    let json_bytes = serde_json::to_vec(value).unwrap_or_default();
+    let json_bytes = canonical_json(value);
     hasher.update(&json_bytes);
     format!("{:x}", hasher.finalize())
+}
+
+/// Produce canonical JSON bytes with sorted object keys for deterministic hashing.
+fn canonical_json(value: &serde_json::Value) -> Vec<u8> {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut sorted: Vec<_> = map.iter().collect();
+            sorted.sort_by_key(|(k, _)| *k);
+            let sorted_map: serde_json::Map<String, serde_json::Value> =
+                sorted.into_iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            serde_json::to_vec(&serde_json::Value::Object(sorted_map)).unwrap_or_default()
+        }
+        _ => serde_json::to_vec(value).unwrap_or_default(),
+    }
 }
 
 #[cfg(test)]

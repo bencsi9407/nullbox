@@ -12,7 +12,8 @@
 
 use crate::supervisor::{ServiceStatus, Supervisor};
 use serde::{Deserialize, Serialize};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -53,6 +54,7 @@ impl ControlSocket {
         }
 
         let listener = UnixListener::bind(path)?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
 
         crate::log_kmsg(&format!("nulld: control socket listening on {SOCKET_PATH}"));
@@ -90,7 +92,7 @@ impl ControlSocket {
         let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(100)));
         let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(100)));
 
-        let reader = BufReader::new(&stream);
+        let reader = BufReader::new((&stream).take(65536));
 
         for line in reader.lines() {
             let line = match line {

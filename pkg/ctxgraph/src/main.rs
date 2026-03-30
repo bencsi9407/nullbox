@@ -8,8 +8,9 @@
 
 use ctxgraph::entry::Entry;
 use ctxgraph::store::Store;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -46,7 +47,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Start TCP listener for agents (TSI-accessible)
     let tcp_store = Arc::clone(&store);
     std::thread::spawn(move || {
-        let listener = match TcpListener::bind(("0.0.0.0", TCP_PORT)) {
+        let listener = match TcpListener::bind(("127.0.0.1", TCP_PORT)) {
             Ok(l) => l,
             Err(e) => {
                 log(&format!("ctxgraph: TCP bind failed: {e}"));
@@ -73,6 +74,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // Unix socket listener for host services
     let listener = UnixListener::bind(SOCKET_PATH)?;
+    std::fs::set_permissions(SOCKET_PATH, std::fs::Permissions::from_mode(0o600))?;
     log(&format!("ctxgraph: listening on {SOCKET_PATH}"));
 
     for stream in listener.incoming() {
@@ -95,7 +97,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 /// Handle a single TCP connection.
 fn handle_tcp_connection(stream: &std::net::TcpStream, store: &Arc<Mutex<Store>>) {
     let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(5000)));
-    let reader = BufReader::new(stream);
+    let reader = BufReader::new(stream.take(65536));
     for line in reader.lines() {
         let line = match line {
             Ok(l) if !l.is_empty() => l,
@@ -111,7 +113,7 @@ fn handle_tcp_connection(stream: &std::net::TcpStream, store: &Arc<Mutex<Store>>
 /// Handle a single Unix socket connection.
 fn handle_unix_connection(stream: &std::os::unix::net::UnixStream, store: &Arc<Mutex<Store>>) {
     let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(5000)));
-    let reader = BufReader::new(stream);
+    let reader = BufReader::new(stream.take(65536));
     for line in reader.lines() {
         let line = match line {
             Ok(l) if !l.is_empty() => l,

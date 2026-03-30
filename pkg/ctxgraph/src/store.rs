@@ -98,12 +98,13 @@ impl Store {
         &self,
         prefix: &str,
     ) -> Result<Vec<Entry>, StoreError> {
-        let pattern = format!("{prefix}%");
+        let escaped_prefix = prefix.replace('%', r"\%").replace('_', r"\_");
+        let pattern = format!("{escaped_prefix}%");
         let mut stmt = self
             .conn
             .prepare(
                 "SELECT hash, agent_id, key, value, timestamp
-                 FROM entries WHERE key LIKE ?1
+                 FROM entries WHERE key LIKE ?1 ESCAPE '\\'
                  ORDER BY timestamp DESC",
             )
             .map_err(StoreError::Sqlite)?;

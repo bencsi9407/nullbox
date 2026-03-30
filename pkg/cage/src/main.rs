@@ -8,7 +8,8 @@ use cage::krun::{self, VmConfig};
 use cage::manifest;
 use cage::vm::{self, VmManager};
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 
@@ -23,8 +24,8 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     // Child process mode: run a VM and never return
-    if args.len() >= 3 && args[1] == "--run-vm" {
-        run_vm_child(&args[2]);
+    if args.len() >= 2 && args[1] == "--run-vm" {
+        run_vm_child();
         // Should never reach here
         std::process::exit(1);
     }
@@ -37,9 +38,15 @@ fn main() {
     }
 }
 
-/// Child process: parse VM config, call krun_start_enter (never returns).
-fn run_vm_child(config_json: &str) {
-    let config: VmConfig = match serde_json::from_str(config_json) {
+/// Child process: parse VM config from stdin, call krun_start_enter (never returns).
+fn run_vm_child() {
+    let mut config_json = String::new();
+    std::io::stdin().read_to_string(&mut config_json).unwrap_or_else(|e| {
+        eprintln!("cage: failed to read VM config from stdin: {e}");
+        std::process::exit(1);
+    });
+
+    let config: VmConfig = match serde_json::from_str(&config_json) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("cage: invalid VM config: {e}");
@@ -103,6 +110,7 @@ fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
 
     // Listen for lifecycle commands (non-blocking for SIGCHLD interleaving)
     let listener = UnixListener::bind(SOCKET_PATH)?;
+    std::fs::set_permissions(SOCKET_PATH, std::fs::Permissions::from_mode(0o600))?;
     listener.set_nonblocking(true)?;
     log(&format!("cage: listening on {SOCKET_PATH}"));
 
@@ -223,7 +231,7 @@ fn handle_command(
 ) {
     let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(500)));
 
-    let reader = BufReader::new(stream);
+    let reader = BufReader::new(stream.take(65536));
     for line in reader.lines() {
         let line = match line {
             Ok(l) => l,

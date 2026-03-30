@@ -180,6 +180,8 @@ fn validate_rootfs(root_path: &str, exec_path: &str) -> Result<(), VmError> {
 }
 
 /// Fork a child process that calls krun_start_enter().
+///
+/// Config is passed via stdin pipe to avoid leaking secrets in /proc/pid/cmdline.
 fn spawn_vm_process(config: &VmConfig) -> Result<u32, VmError> {
     let config_json =
         serde_json::to_string(config).map_err(|e| VmError::Internal(e.to_string()))?;
@@ -188,11 +190,18 @@ fn spawn_vm_process(config: &VmConfig) -> Result<u32, VmError> {
     let cage_bin = std::env::current_exe()
         .unwrap_or_else(|_| std::path::PathBuf::from("/system/bin/cage"));
 
-    let child = std::process::Command::new(cage_bin)
+    let mut child = std::process::Command::new(cage_bin)
         .arg("--run-vm")
-        .arg(&config_json)
+        .stdin(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| VmError::SpawnFailed(e.to_string()))?;
+
+    // Write config to child's stdin (not visible in /proc/pid/cmdline)
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        let _ = stdin.write_all(config_json.as_bytes());
+        // stdin is dropped here, closing the pipe
+    }
 
     Ok(child.id())
 }

@@ -10,7 +10,8 @@
 //!   {"method":"delete","key":"OPENAI_KEY"}
 //!   {"method":"list"}
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::Path;
 use warden::vault::{self, Vault};
@@ -50,6 +51,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let listener = UnixListener::bind(SOCKET_PATH)?;
+    std::fs::set_permissions(SOCKET_PATH, std::fs::Permissions::from_mode(0o600))?;
     log(&format!("warden: listening on {SOCKET_PATH}"));
 
     for stream in listener.incoming() {
@@ -69,7 +71,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 fn handle_connection(stream: &std::os::unix::net::UnixStream, vault: &mut Vault) {
     let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(500)));
 
-    let reader = BufReader::new(stream);
+    let reader = BufReader::new(stream.take(65536));
     for line in reader.lines() {
         let line = match line {
             Ok(l) => l,

@@ -126,9 +126,23 @@ pub fn parse(content: &str) -> Result<AgentManifest, ManifestError> {
 
 /// Validate manifest constraints.
 fn validate(manifest: &AgentManifest) -> Result<(), ManifestError> {
-    if manifest.agent.name.is_empty() {
+    let name = &manifest.agent.name;
+
+    if name.is_empty() {
         return Err(ManifestError::Validation(
             "agent.name cannot be empty".to_string(),
+        ));
+    }
+
+    if name.contains('/') || name.contains("..") || name.contains('\0') {
+        return Err(ManifestError::Validation(
+            "agent.name contains invalid characters (/, .., or null)".into(),
+        ));
+    }
+
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err(ManifestError::Validation(
+            "agent.name must be alphanumeric with hyphens/underscores only".into(),
         ));
     }
 
