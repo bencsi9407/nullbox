@@ -5,7 +5,7 @@
 //! The parent (cage daemon) tracks child PIDs and handles lifecycle.
 
 use crate::krun::{self, VmConfig, VirtiofsMount};
-use crate::manifest::AgentManifest;
+use crate::manifest::{AgentManifest, HealthCheck, Runtime};
 use std::collections::HashMap;
 
 /// Returned when a VM child process exits.
@@ -21,6 +21,15 @@ pub struct RunningVm {
     pub pid: u32,
     pub vcpus: u8,
     pub ram_mib: u32,
+    pub health: Option<HealthState>,
+}
+
+/// Tracks health check state for an agent VM.
+#[derive(Debug)]
+pub struct HealthState {
+    pub config: HealthCheck,
+    pub consecutive_failures: u32,
+    pub last_check: std::time::Instant,
 }
 
 /// Manages all running agent VMs.
@@ -44,7 +53,7 @@ impl VmManager {
     pub fn start_agent(
         &mut self,
         manifest: &AgentManifest,
-        exec_path: &str,
+        _exec_path: &str,
         secrets: &HashMap<String, String>,
     ) -> Result<u32, VmError> {
         let name = &manifest.agent.name;
@@ -60,6 +69,15 @@ impl VmManager {
 
         let rootfs_path =
             format!("{}/{}", self.agent_rootfs_base, name);
+
+        // Derive exec_path and args from runtime type
+        let (effective_exec_path, effective_args) = match manifest.agent.runtime {
+            Runtime::Binary => (format!("/agent/bin/{name}"), vec![]),
+            Runtime::Python => (
+                "/system/python/bin/python3".to_string(),
+                vec!["/agent/main.py".to_string()],
+            ),
+        };
 
         // Build virtiofs mounts from manifest filesystem declarations
         let virtiofs_mounts = build_virtiofs_mounts(name, &manifest.capabilities.filesystem);
@@ -78,8 +96,8 @@ impl VmManager {
             vcpus,
             ram_mib,
             root_path: rootfs_path,
-            exec_path: exec_path.to_string(),
-            args: vec![],
+            exec_path: effective_exec_path,
+            args: effective_args,
             env: {
                 let mut env = vec![
                     format!("AGENT_NAME={name}"),
@@ -101,6 +119,12 @@ impl VmManager {
         validate_rootfs(&config.root_path, &config.exec_path)?;
         let pid = spawn_vm_process(&config)?;
 
+        let health = manifest.capabilities.health_check.as_ref().map(|hc| HealthState {
+            config: hc.clone(),
+            consecutive_failures: 0,
+            last_check: std::time::Instant::now(),
+        });
+
         self.vms.insert(
             name.clone(),
             RunningVm {
@@ -108,6 +132,7 @@ impl VmManager {
                 pid,
                 vcpus,
                 ram_mib,
+                health,
             },
         );
 
@@ -156,6 +181,46 @@ impl VmManager {
     /// Check if an agent is running.
     pub fn is_running(&self, name: &str) -> bool {
         self.vms.contains_key(name)
+    }
+
+    /// Run a health check sweep across all VMs with health checks configured.
+    ///
+    /// Returns the names of agents that have exceeded their max_failures threshold.
+    pub fn health_check_sweep(&mut self) -> Vec<String> {
+        let now = std::time::Instant::now();
+        let mut unhealthy = Vec::new();
+
+        for (name, vm) in &mut self.vms {
+            let health = match &mut vm.health {
+                Some(h) => h,
+                None => continue,
+            };
+
+            let interval = std::time::Duration::from_secs(health.config.interval_secs as u64);
+            if now.duration_since(health.last_check) < interval {
+                continue;
+            }
+
+            health.last_check = now;
+
+            // Try TCP connect to the health check port
+            let addr = std::net::SocketAddr::from(([127, 0, 0, 1], health.config.port));
+            let timeout = std::time::Duration::from_secs(2);
+
+            match std::net::TcpStream::connect_timeout(&addr, timeout) {
+                Ok(_) => {
+                    health.consecutive_failures = 0;
+                }
+                Err(_) => {
+                    health.consecutive_failures += 1;
+                    if health.consecutive_failures >= health.config.max_failures {
+                        unhealthy.push(name.clone());
+                    }
+                }
+            }
+        }
+
+        unhealthy
     }
 }
 
@@ -357,6 +422,7 @@ mod tests {
                 pid: 1234,
                 vcpus: 1,
                 ram_mib: 256,
+                health: None,
             },
         );
 

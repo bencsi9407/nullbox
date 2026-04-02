@@ -21,10 +21,23 @@ pub struct AgentMeta {
     pub name: String,
     #[serde(default = "default_version")]
     pub version: String,
+    #[serde(default = "default_runtime")]
+    pub runtime: Runtime,
 }
 
 fn default_version() -> String {
     "0.0.0".to_string()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Runtime {
+    Binary,
+    Python,
+}
+
+fn default_runtime() -> Runtime {
+    Runtime::Binary
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +58,31 @@ pub struct Capabilities {
     pub max_memory_mb: u32,
     #[serde(default)]
     pub max_api_calls_per_hour: u32,
+    #[serde(default)]
+    pub health_check: Option<HealthCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthCheck {
+    pub port: u16,
+    #[serde(default = "default_health_path")]
+    pub path: String,
+    #[serde(default = "default_health_interval")]
+    pub interval_secs: u32,
+    #[serde(default = "default_health_failures")]
+    pub max_failures: u32,
+}
+
+fn default_health_path() -> String {
+    "/health".to_string()
+}
+
+fn default_health_interval() -> u32 {
+    30
+}
+
+fn default_health_failures() -> u32 {
+    3
 }
 
 impl Default for Capabilities {
@@ -58,6 +96,7 @@ impl Default for Capabilities {
             max_cpu_percent: default_cpu(),
             max_memory_mb: default_memory(),
             max_api_calls_per_hour: 0,
+            health_check: None,
         }
     }
 }
@@ -303,6 +342,64 @@ name = "bad"
 read = ["relative/path"]
 "#;
         assert!(parse(toml).is_err());
+    }
+
+    #[test]
+    fn parse_runtime_python() {
+        let toml = r#"
+[agent]
+name = "py-agent"
+runtime = "python"
+"#;
+        let manifest = parse(toml).unwrap();
+        assert_eq!(manifest.agent.runtime, Runtime::Python);
+    }
+
+    #[test]
+    fn default_runtime_is_binary() {
+        let toml = r#"
+[agent]
+name = "bin-agent"
+"#;
+        let manifest = parse(toml).unwrap();
+        assert_eq!(manifest.agent.runtime, Runtime::Binary);
+    }
+
+    #[test]
+    fn parse_health_check() {
+        let toml = r#"
+[agent]
+name = "healthy"
+
+[capabilities.health_check]
+port = 8080
+path = "/healthz"
+interval_secs = 10
+max_failures = 5
+"#;
+        let manifest = parse(toml).unwrap();
+        let hc = manifest.capabilities.health_check.unwrap();
+        assert_eq!(hc.port, 8080);
+        assert_eq!(hc.path, "/healthz");
+        assert_eq!(hc.interval_secs, 10);
+        assert_eq!(hc.max_failures, 5);
+    }
+
+    #[test]
+    fn health_check_defaults() {
+        let toml = r#"
+[agent]
+name = "healthy"
+
+[capabilities.health_check]
+port = 3000
+"#;
+        let manifest = parse(toml).unwrap();
+        let hc = manifest.capabilities.health_check.unwrap();
+        assert_eq!(hc.port, 3000);
+        assert_eq!(hc.path, "/health");
+        assert_eq!(hc.interval_secs, 30);
+        assert_eq!(hc.max_failures, 3);
     }
 
     #[test]

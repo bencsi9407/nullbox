@@ -4,8 +4,9 @@
 //! 1. Daemon mode (default): scans manifests, listens for commands, manages VM lifecycle
 //! 2. VM runner mode (--run-vm): child process that calls krun_start_enter()
 
+use cage::deploy;
 use cage::krun::{self, VmConfig};
-use cage::manifest;
+use cage::manifest::{self, Runtime};
 use cage::vm::{self, VmManager};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -115,7 +116,7 @@ fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Scan for agent manifests
-    let manifests = load_manifests();
+    let mut manifests = load_manifests();
     log(&format!("cage: {} agent manifest(s) loaded", manifests.len()));
 
     // Initialize VM manager (rootfs lives on read-only SquashFS at /system/rootfs/)
@@ -135,10 +136,13 @@ fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
 
     // Auto-start all agents that have a valid rootfs
     for (name, manifest) in &manifests {
-        let exec_path = format!("/agent/bin/{name}");
         let rootfs_path = format!("{AGENT_ROOTFS_BASE}/{name}");
-        let bin_path = format!("{rootfs_path}/agent/bin/{name}");
-        if Path::new(&bin_path).exists() {
+        let rootfs_check = match manifest.agent.runtime {
+            Runtime::Binary => format!("{rootfs_path}/agent/bin/{name}"),
+            Runtime::Python => format!("{rootfs_path}/agent/main.py"),
+        };
+        let exec_path = format!("/agent/bin/{name}");
+        if Path::new(&rootfs_check).exists() {
             let secrets = request_secrets(name, &manifest.capabilities.credential_refs);
             match vm_mgr.start_agent(manifest, &exec_path, &secrets) {
                 Ok(pid) => {
@@ -162,10 +166,34 @@ fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
         // Reap any exited child processes (non-blocking)
         reap_children(&mut vm_mgr, &manifests);
 
+        // Health check sweep: restart agents that have exceeded max_failures
+        let unhealthy = vm_mgr.health_check_sweep();
+        for name in &unhealthy {
+            log(&format!("cage: agent '{name}' failed health check — restarting"));
+            if let Err(e) = vm_mgr.stop_agent(name) {
+                log(&format!("cage: failed to stop unhealthy '{name}': {e}"));
+            }
+            if let Some(manifest) = manifests.get(name) {
+                let exec_path = format!("/agent/bin/{name}");
+                let secrets = request_secrets(name, &manifest.capabilities.credential_refs);
+                match vm_mgr.start_agent(manifest, &exec_path, &secrets) {
+                    Ok(pid) => {
+                        log(&format!("cage: restarted unhealthy '{name}' (PID {pid})"));
+                        notify_egress_add(name, &manifest.capabilities.network.allow);
+                        audit_record(name, "health-restart", "success", &format!("PID {pid}"));
+                    }
+                    Err(e) => {
+                        log(&format!("cage: failed to restart unhealthy '{name}': {e}"));
+                        audit_record(name, "health-restart", "failure", &e.to_string());
+                    }
+                }
+            }
+        }
+
         // Try to accept a connection (non-blocking)
         match listener.accept() {
             Ok((stream, _)) => {
-                handle_command(&stream, &mut vm_mgr, &manifests);
+                handle_command(&stream, &mut vm_mgr, &mut manifests);
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 // No pending connections — sleep briefly to avoid busy-wait
@@ -210,7 +238,10 @@ fn reap_children(
                             exit.agent_name
                         ));
                         std::thread::sleep(std::time::Duration::from_secs(2));
-                        let exec_path = format!("/agent/bin/{}", exit.agent_name);
+                        let exec_path = match manifest.agent.runtime {
+                            Runtime::Binary => format!("/agent/bin/{}", exit.agent_name),
+                            Runtime::Python => "/system/python/bin/python3".to_string(),
+                        };
                         let secrets = request_secrets(
                             &exit.agent_name,
                             &manifest.capabilities.credential_refs,
@@ -256,7 +287,7 @@ fn reap_children(
 fn handle_command(
     stream: &std::os::unix::net::UnixStream,
     vm_mgr: &mut VmManager,
-    manifests: &HashMap<String, manifest::AgentManifest>,
+    manifests: &mut HashMap<String, manifest::AgentManifest>,
 ) {
     let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(500)));
 
@@ -292,6 +323,7 @@ fn handle_command(
                     .unwrap_or("");
                 handle_stop(vm_mgr, name)
             }
+            "deploy" => handle_deploy(vm_mgr, manifests, &request),
             "list" => {
                 let vms: Vec<serde_json::Value> = vm_mgr
                     .list()
@@ -318,7 +350,7 @@ fn handle_command(
 
 fn handle_start(
     vm_mgr: &mut VmManager,
-    manifests: &HashMap<String, manifest::AgentManifest>,
+    manifests: &mut HashMap<String, manifest::AgentManifest>,
     name: &str,
 ) -> serde_json::Value {
     let manifest = match manifests.get(name) {
@@ -345,6 +377,40 @@ fn handle_start(
             serde_json::json!({"error": e.to_string()})
         }
     }
+}
+
+fn handle_deploy(
+    vm_mgr: &mut VmManager,
+    manifests: &mut HashMap<String, manifest::AgentManifest>,
+    request: &serde_json::Value,
+) -> serde_json::Value {
+    use base64::Engine;
+
+    let bundle_b64 = match request.get("bundle").and_then(|b| b.as_str()) {
+        Some(b) => b,
+        None => return serde_json::json!({"error": "missing 'bundle' field"}),
+    };
+
+    let bundle_bytes = match base64::engine::general_purpose::STANDARD.decode(bundle_b64) {
+        Ok(b) => b,
+        Err(e) => return serde_json::json!({"error": format!("invalid base64: {e}")}),
+    };
+
+    let agent_manifest = match deploy::unpack_bundle(&bundle_bytes, AGENT_DIR, AGENT_ROOTFS_BASE) {
+        Ok(m) => m,
+        Err(e) => return serde_json::json!({"error": format!("deploy failed: {e}")}),
+    };
+
+    let name = agent_manifest.agent.name.clone();
+    manifests.insert(name.clone(), agent_manifest);
+
+    // Auto-start the deployed agent
+    let start_result = handle_start(vm_mgr, manifests, &name);
+    if start_result.get("error").is_some() {
+        return start_result;
+    }
+
+    serde_json::json!({"ok": true, "agent": name})
 }
 
 fn handle_stop(

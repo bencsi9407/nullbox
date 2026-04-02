@@ -1,6 +1,6 @@
 //! nullctl — CLI for NullBox.
 //!
-//! Communicates with nulld and cage via Unix sockets.
+//! Communicates with nulld, cage, sentinel, watcher, and egress via Unix sockets.
 
 use std::env;
 use std::io::{BufRead, BufReader, Write};
@@ -10,6 +10,9 @@ use std::process;
 const NULLD_SOCKET: &str = "/run/nulld.sock";
 const CAGE_SOCKET: &str = "/run/cage.sock";
 const WARDEN_SOCKET: &str = "/run/warden.sock";
+const SENTINEL_SOCKET: &str = "/run/sentinel.sock";
+const WATCHER_SOCKET: &str = "/run/watcher.sock";
+const EGRESS_SOCKET: &str = "/run/egress.sock";
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -24,6 +27,11 @@ fn main() {
         "shutdown" => handle_shutdown(),
         "cage" => handle_cage(&args[1..]),
         "vault" => handle_vault(&args[1..]),
+        "deploy" => handle_deploy(&args[1..]),
+        "sentinel" => handle_sentinel(&args[1..]),
+        "watcher" => handle_watcher(&args[1..]),
+        "egress" => handle_egress(&args[1..]),
+        "logs" => handle_logs(&args[1..]),
         "help" | "--help" | "-h" => {
             print_usage();
             Ok(())
@@ -217,6 +225,169 @@ fn handle_vault(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn handle_deploy(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    use base64::Engine;
+
+    let bundle_path = args.first().ok_or("usage: nullctl deploy <bundle.tar.gz>")?;
+
+    let bundle_data = std::fs::read(bundle_path)
+        .map_err(|e| format!("cannot read bundle '{bundle_path}': {e}"))?;
+
+    let bundle_b64 = base64::engine::general_purpose::STANDARD.encode(&bundle_data);
+
+    let resp = send_cage_request(serde_json::json!({
+        "method": "deploy",
+        "bundle": bundle_b64,
+    }))?;
+
+    let parsed: serde_json::Value = serde_json::from_str(&resp)?;
+
+    if parsed.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+        let agent = parsed.get("agent").and_then(|a| a.as_str()).unwrap_or("?");
+        println!("cage: deployed and started agent '{agent}'");
+    } else if let Some(err) = parsed.get("error").and_then(|e| e.as_str()) {
+        eprintln!("cage: {err}");
+        process::exit(1);
+    }
+
+    Ok(())
+}
+
+fn handle_sentinel(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.is_empty() {
+        eprintln!("nullctl sentinel: missing subcommand");
+        eprintln!();
+        eprintln!("usage:");
+        eprintln!("  nullctl sentinel stats            Show sentinel statistics");
+        process::exit(1);
+    }
+
+    match args[0].as_str() {
+        "stats" => {
+            let resp = send_to_socket(
+                SENTINEL_SOCKET,
+                &serde_json::json!({"method": "stats"}),
+            )?;
+            println!("{resp}");
+        }
+        other => {
+            eprintln!("nullctl sentinel: unknown subcommand '{other}'");
+            process::exit(1);
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_watcher(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.is_empty() {
+        eprintln!("nullctl watcher: missing subcommand");
+        eprintln!();
+        eprintln!("usage:");
+        eprintln!("  nullctl watcher verify <agent>    Verify agent audit chain");
+        eprintln!("  nullctl watcher query <agent>     Query recent audit entries");
+        process::exit(1);
+    }
+
+    match args[0].as_str() {
+        "verify" => {
+            let agent = args.get(1).ok_or("usage: nullctl watcher verify <agent>")?;
+            let resp = send_to_socket(
+                WATCHER_SOCKET,
+                &serde_json::json!({"method": "verify", "agent": agent}),
+            )?;
+            let parsed: serde_json::Value = serde_json::from_str(&resp)?;
+
+            if parsed.get("valid").and_then(|v| v.as_bool()) == Some(true) {
+                println!("watcher: audit chain for '{agent}' is valid");
+            } else if let Some(err) = parsed.get("error").and_then(|e| e.as_str()) {
+                eprintln!("watcher: {err}");
+                process::exit(1);
+            } else {
+                eprintln!("watcher: audit chain for '{agent}' is INVALID");
+                if let Some(detail) = parsed.get("detail").and_then(|d| d.as_str()) {
+                    eprintln!("  detail: {detail}");
+                }
+                process::exit(1);
+            }
+        }
+        "query" => {
+            let agent = args.get(1).ok_or("usage: nullctl watcher query <agent>")?;
+            let resp = send_to_socket(
+                WATCHER_SOCKET,
+                &serde_json::json!({"method": "query", "agent": agent}),
+            )?;
+            let parsed: serde_json::Value = serde_json::from_str(&resp)?;
+
+            if let Some(entries) = parsed.get("entries").and_then(|e| e.as_array()) {
+                if entries.is_empty() {
+                    println!("no audit entries for '{agent}'");
+                } else {
+                    for entry in entries {
+                        let action = entry.get("action").and_then(|a| a.as_str()).unwrap_or("?");
+                        let outcome = entry.get("outcome").and_then(|o| o.as_str()).unwrap_or("?");
+                        let detail = entry.get("detail").and_then(|d| d.as_str()).unwrap_or("");
+                        let ts = entry.get("timestamp").and_then(|t| t.as_str()).unwrap_or("?");
+                        println!("[{ts}] {action} {outcome} {detail}");
+                    }
+                }
+            } else if let Some(err) = parsed.get("error").and_then(|e| e.as_str()) {
+                eprintln!("watcher: {err}");
+                process::exit(1);
+            }
+        }
+        other => {
+            eprintln!("nullctl watcher: unknown subcommand '{other}'");
+            process::exit(1);
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_egress(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.is_empty() {
+        eprintln!("nullctl egress: missing subcommand");
+        eprintln!();
+        eprintln!("usage:");
+        eprintln!("  nullctl egress list               List active firewall rules");
+        process::exit(1);
+    }
+
+    match args[0].as_str() {
+        "list" => {
+            let resp = send_to_socket(
+                EGRESS_SOCKET,
+                &serde_json::json!({"method": "list"}),
+            )?;
+            println!("{resp}");
+        }
+        other => {
+            eprintln!("nullctl egress: unknown subcommand '{other}'");
+            process::exit(1);
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_logs(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let agent = args.first().ok_or("usage: nullctl logs <agent>")?;
+    let log_path = format!("/var/log/cage/{agent}.log");
+
+    let content = std::fs::read_to_string(&log_path)
+        .map_err(|e| format!("cannot read {log_path}: {e}"))?;
+
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.len().saturating_sub(50);
+
+    for line in &lines[start..] {
+        println!("{line}");
+    }
+
+    Ok(())
+}
+
 fn send_nulld_request(method: &str) -> Result<String, Box<dyn std::error::Error>> {
     let request = serde_json::json!({"method": method});
     send_to_socket(NULLD_SOCKET, &request)
@@ -252,6 +423,12 @@ fn print_usage() {
     eprintln!("  nullctl cage list                 List running agent VMs");
     eprintln!("  nullctl cage start <agent>        Start an agent microVM");
     eprintln!("  nullctl cage stop <agent>         Stop an agent microVM");
+    eprintln!("  nullctl deploy <bundle.tar.gz>    Deploy agent bundle to cage");
+    eprintln!("  nullctl sentinel stats            Show sentinel statistics");
+    eprintln!("  nullctl watcher verify <agent>    Verify agent audit chain");
+    eprintln!("  nullctl watcher query <agent>     Query recent audit entries");
+    eprintln!("  nullctl egress list               List active firewall rules");
+    eprintln!("  nullctl logs <agent>              Tail agent console log");
     eprintln!("  nullctl vault list                List stored secret keys");
     eprintln!("  nullctl vault set <KEY> <VALUE>   Set a secret");
     eprintln!("  nullctl vault delete <KEY>        Delete a secret");
