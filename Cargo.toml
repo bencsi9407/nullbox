@@ -8,6 +8,7 @@ members = [
     "pkg/ctxgraph",
     "pkg/warden",
     "pkg/test-agent",
+    "pkg/test-harness",
 ]
 
 [workspace.package]

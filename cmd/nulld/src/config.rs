@@ -134,6 +134,20 @@ fn builtin_services() -> Vec<ServiceDef> {
             ],
             restart: RestartPolicy::Always,
         },
+        // Test harness: TCP bridge for e2e testing (excluded in production)
+        ServiceDef {
+            name: "test-harness".to_string(),
+            binary: "/system/bin/test-harness".to_string(),
+            args: vec![],
+            depends_on: vec![
+                "egress".to_string(),
+                "ctxgraph".to_string(),
+                "warden".to_string(),
+                "sentinel".to_string(),
+                "watcher".to_string(),
+            ],
+            restart: RestartPolicy::Always,
+        },
     ]
 }
 

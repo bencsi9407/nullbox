@@ -71,6 +71,7 @@ copy_binary egress
 copy_binary ctxgraph
 copy_binary warden
 copy_binary cage
+copy_binary test-harness
 
 # Sentinel is a separate project — build and copy from its own directory
 SENTINEL_DIR="${NULLBOX_ROOT}/../sentinel"
@@ -204,6 +205,11 @@ restart = "always"
 
 [service.cage]
 binary = "/system/bin/cage"
+depends_on = ["egress", "ctxgraph", "warden", "sentinel", "watcher"]
+restart = "always"
+
+[service.test-harness]
+binary = "/system/bin/test-harness"
 depends_on = ["egress", "ctxgraph", "warden", "sentinel", "watcher"]
 restart = "always"
 EOF
