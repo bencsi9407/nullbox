@@ -9,6 +9,7 @@ members = [
     "pkg/warden",
     "pkg/test-agent",
     "pkg/test-harness",
+    "pkg/nullweb",
 ]
 
 [workspace.package]

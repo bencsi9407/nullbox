@@ -72,6 +72,7 @@ copy_binary ctxgraph
 copy_binary warden
 copy_binary cage
 copy_binary test-harness
+copy_binary nullweb
 
 # Sentinel is a separate project — build and copy from its own directory
 SENTINEL_DIR="${NULLBOX_ROOT}/../sentinel"
@@ -212,8 +213,19 @@ restart = "always"
 binary = "/system/bin/test-harness"
 depends_on = ["egress", "ctxgraph", "warden", "sentinel", "watcher"]
 restart = "always"
+
+[service.nullweb]
+binary = "/system/bin/nullweb"
+depends_on = ["egress", "ctxgraph", "warden", "sentinel", "watcher", "cage"]
+restart = "always"
 EOF
 echo "  Created nulld.toml"
+
+# Copy agent registry
+if [[ -f "${NULLBOX_ROOT}/registry/agents.json" ]]; then
+    cp "${NULLBOX_ROOT}/registry/agents.json" "${BUILD_DIR}/system/config/registry.json"
+    echo "  Copied agent registry"
+fi
 
 # Create minimal /etc
 echo "nullbox" > "${BUILD_DIR}/etc/hostname"

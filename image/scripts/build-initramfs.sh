@@ -231,17 +231,74 @@ else
     log "nullbox: WARNING — no network interface found"
 fi
 
-log "nullbox: pivoting to SquashFS root"
+# ── OverlayFS: writable layer over immutable SquashFS ──
+log "nullbox: setting up overlay filesystem"
+mkdir -p /overlay /merged
+
+# Try persistent partition first (ext4 with .nullbox-data sentinel)
+OVERLAY_PERSISTENT=0
+for dev in /dev/sda* /dev/sdb* /dev/vda* /dev/nvme*; do
+    [ -b "${dev}" ] || continue
+    if mount -t ext4 -o noatime "${dev}" /overlay 2>/dev/null; then
+        if [ -f /overlay/.nullbox-data ]; then
+            log "nullbox: persistent storage on ${dev}"
+            OVERLAY_PERSISTENT=1
+            mkdir -p /overlay/upper /overlay/work
+            break
+        fi
+        umount /overlay 2>/dev/null
+    fi
+done
+
+# Auto-format: if no persistent partition found, check for empty partitions
+if [ "${OVERLAY_PERSISTENT}" -eq 0 ]; then
+    for dev in /dev/sda2 /dev/vda2 /dev/sdb1; do
+        [ -b "${dev}" ] || continue
+        # Only format if partition has no filesystem
+        if ! mount "${dev}" /overlay 2>/dev/null; then
+            log "nullbox: formatting ${dev} as persistent storage"
+            mkfs.ext4 -q -L nullbox-data "${dev}" 2>/dev/null && \
+            mount -t ext4 -o noatime "${dev}" /overlay 2>/dev/null && \
+            touch /overlay/.nullbox-data && \
+            OVERLAY_PERSISTENT=1 && \
+            mkdir -p /overlay/upper /overlay/work && \
+            log "nullbox: persistent storage created on ${dev}" && \
+            break
+        else
+            umount /overlay 2>/dev/null
+        fi
+    done
+fi
+
+# Fall back to tmpfs (volatile — lost on reboot)
+if [ "${OVERLAY_PERSISTENT}" -eq 0 ]; then
+    mount -t tmpfs -o size=512m tmpfs /overlay
+    mkdir -p /overlay/upper /overlay/work
+    log "nullbox: volatile overlay (tmpfs)"
+fi
+
+# Mount overlay: SquashFS lower + writable upper = merged
+mount -t overlay overlay \
+    -o lowerdir=/newroot,upperdir=/overlay/upper,workdir=/overlay/work \
+    /merged
+
+if [ ! -x /merged/system/bin/nulld ]; then
+    log "nullbox: overlay failed — falling back to read-only SquashFS"
+    umount /proc 2>/dev/null; umount /sys 2>/dev/null; umount /dev 2>/dev/null
+    exec switch_root /newroot /system/bin/nulld
+fi
+
+log "nullbox: overlay ready — pivoting"
 
 # Clean up initramfs mounts before pivot
 umount /proc 2>/dev/null
 umount /sys 2>/dev/null
 umount /dev 2>/dev/null
 
-# Pivot root: switch_root moves to newroot and execs nulld
-exec switch_root /newroot /system/bin/nulld
+# Pivot to overlay-merged root
+exec switch_root /merged /system/bin/nulld
 
-# If switch_root fails, we end up here
+# If switch_root fails
 log "nullbox: FATAL — switch_root failed!"
 while true; do sleep 3600; done
 INIT_EOF

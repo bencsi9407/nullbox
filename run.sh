@@ -45,7 +45,7 @@ case "${MODE}" in
             -nographic -serial mon:stdio \
             -kernel "${VMLINUZ}" -initrd "${INITRAMFS}" \
             -append "console=ttyS0,115200 loglevel=4" \
-            -nic user,model=virtio,hostfwd=tcp::19100-:9100,hostfwd=tcp::19200-:9200
+            -nic user,model=virtio,hostfwd=tcp::19100-:9100,hostfwd=tcp::19200-:9200,hostfwd=tcp::8080-:8080
         ;;
     *)
         echo "NullBox — The Operating System for AI Agents"

@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "agents": [
+    {
+      "name": "researcher",
+      "version": "0.1.0",
+      "description": "Web research agent — searches, summarizes, and stores findings in ctxgraph",
+      "runtime": "python",
+      "capabilities": {
+        "network": ["api.openai.com", "api.perplexity.ai", "api.exa.ai"],
+        "max_memory_mb": 512,
+        "max_cpu_percent": 50,
+        "tools": ["web_search", "read_files", "write_files"]
+      },
+      "bundle_url": "https://github.com/rohansx/nullbox-agents/releases/download/v0.1.0/researcher.tar.gz"
+    },
+    {
+      "name": "coder",
+      "version": "0.1.0",
+      "description": "Code generation agent — writes, tests, and commits code",
+      "runtime": "python",
+      "capabilities": {
+        "network": ["api.anthropic.com"],
+        "max_memory_mb": 1024,
+        "max_cpu_percent": 75,
+        "tools": ["read_files", "write_files", "execute_code"]
+      },
+      "bundle_url": "https://github.com/rohansx/nullbox-agents/releases/download/v0.1.0/coder.tar.gz"
+    },
+    {
+      "name": "monitor",
+      "version": "0.1.0",
+      "description": "System monitoring agent — watches metrics, alerts on anomalies",
+      "runtime": "binary",
+      "capabilities": {
+        "network": [],
+        "max_memory_mb": 128,
+        "max_cpu_percent": 10,
+        "tools": ["read_files"]
+      },
+      "bundle_url": "https://github.com/rohansx/nullbox-agents/releases/download/v0.1.0/monitor.tar.gz"
+    }
+  ]
+}

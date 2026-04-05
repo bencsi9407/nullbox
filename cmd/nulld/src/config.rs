@@ -148,6 +148,21 @@ fn builtin_services() -> Vec<ServiceDef> {
             ],
             restart: RestartPolicy::Always,
         },
+        // Web dashboard: serves HTML UI and proxies API to all services
+        ServiceDef {
+            name: "nullweb".to_string(),
+            binary: "/system/bin/nullweb".to_string(),
+            args: vec![],
+            depends_on: vec![
+                "egress".to_string(),
+                "ctxgraph".to_string(),
+                "warden".to_string(),
+                "sentinel".to_string(),
+                "watcher".to_string(),
+                "cage".to_string(),
+            ],
+            restart: RestartPolicy::Always,
+        },
     ]
 }
 
